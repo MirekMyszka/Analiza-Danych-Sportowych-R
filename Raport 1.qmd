@@ -1,0 +1,630 @@
+---
+title: "Raport 1"
+author: "Weronika Bartoszewska, Mirosław Myszka"
+date: "2025-12-19"
+format: 
+  pdf:
+    echo: false
+    warning: false
+    message: false
+---
+
+# Opis danych
+
+**CEL ANALIZY:** Głównym celem niniejszego raportu jest zbadanie czynników wpływających na wyniki meczów piłkarskich oraz ocena skuteczności różnych źródeł informacji w przewidywaniu rezultatów. Analiza skupia się na trzech kluczowych filarach: obiektywnej sile zespołów wyrażonej rankingiem Elo, aktualnej formie krótkoterminowej (momentum) oraz rynkowej wycenie szans przez kursy bukmacherskie. Porównamy przewidywalność różnych lig europejskich i światowych oraz sprawdzimy, czy mecze o najwyższym poziomie sportowym są trudniejsze do trafnego wytypowania.
+
+**POCHODZENIE DANYCH:**
+Analiza opiera się na zbiorze *Club Football Match Data*, opracowanym przez Adama Gábora (Słowacki Uniwersytet Techniczny w Bratysławie). Dane zostały zagregowane z ogólnodostępnych serwisów statystycznych oraz historycznych baz bukmacherskich i obejmują rozgrywki z lat 2000–2025. Zbiór został udostępniony publicznie w otwartym repozytorium GitHub do celów badawczych i edukacyjnych.
+
+**OPIS ZMIENNYCH:**
+
+W poniższym zestawieniu znajdują się kluczowe zmienne, które posłużyły do budowy statystyk opisowych oraz weryfikacji pytań badawczych.
+
+#### Identyfikacja meczu i ligi
+
+- **NazwaLigi**: zmienna kategoryczna (pełna nazwa), przetworzona nazwa ligi ułatwiająca interpretację wyników (np. Premier League, Bundesliga).
+- **Gospodarz, Gosc**: zmienne kategoryczne, nazwy drużyn biorących udział w spotkaniu.
+
+#### Rankingi i siła drużyn
+
+- **EloGospodarz, EloGosc**: zmienne ciągłe, ranking punktowy Elo drużyn bezpośrednio przed meczem. Jest to główny parametr określający teoretyczną, historyczną siłę zespołu.
+
+#### Forma i aktualna dyspozycja
+
+- **Forma3Gospodarz, Forma3Gosc**: zmienne dyskretne, suma punktów zdobytych przez zespół w ostatnich **3 meczach** poprzedzających dane spotkanie (Zwycięstwo = 3 pkt, Remis = 1 pkt, Porażka = 0 pkt). Pozwala ocenić bardzo krótkoterminową dyspozycję.
+- **Forma5Gospodarz, Forma5Gosc**: zmienne dyskretne, suma punktów zdobytych przez zespół w ostatnich **5 meczach**. Pozwala ocenić stabilność formy w nieco dłuższym okresie.
+
+#### Wynik meczu
+
+- **GoleGospodarz_Koniec, GoleGosc_Koniec**: zmienne dyskretne, liczba bramek zdobytych odpowiednio przez gospodarzy i gości. Wykorzystane do obliczenia ogólnych statystyk skuteczności w tabeli podsumowującej.
+- **Wynik_Koniec**: zmienna kategoryczna, ostateczne rozstrzygnięcie meczu (**H** – wygrana gospodarzy, **D** – remis, **A** – wygrana gości). Główna zmienna objaśniana w analizie.
+
+#### Kursy bukmacherskie
+
+- **KursGospodarz, KursRemis, KursGosc**: zmienne ciągłe, kursy zamknięcia oferowane przez bukmachera. Wykorzystane do zbadania efektywności przewidywań rynkowych oraz identyfikacji niespodzianek.
+
+**PYTANIA BADAWCZE:**
+
+1. Jak ranking Elo oraz krótkoterminowa forma drużyn korelują z rzeczywistym wynikiem końcowym meczu?
+
+2. Czy w meczach o dużej stawce można zaobserwować większe odchylenia w przewidywaniach rankingu Elo i kursach bukmacherskich niż w meczach o mniejszym znaczeniu?
+
+3. Które ligi są najtrudniejsze do przewidzenia zarówno dla modelu Elo, jak i rynku bukmacherskiego?
+
+4. Czy drużyny podchodzące do spotkania z dobrą serią mają większe prawdopodobieństwo zwycięstwa?
+
+------------------------------------------------------------------------
+
+## Wczytanie i przygotowanie danych
+
+W tej części raportu dokonujemy importu surowych danych z pliku CSV oraz czyścimy je, aby ułatwić dalszą analizę. Nadajemy zmiennym polskie, bardziej przyjazne dla użytkownika nazwy oraz naprawiamy błąd wczytywania danych zmiennoprzecinkowych przez R.
+```{r}
+#| include: false
+library(tidyverse)
+
+dane <- read_delim("Matches (3).csv", 
+                   delim = ";", 
+                   col_types = cols(.default = col_character()), 
+                   show_col_types = FALSE)
+
+
+dane <- dane |>
+  rename(
+    Liga = Division,
+    Data = MatchDate,
+    Godzina = MatchTime,
+    Gospodarz = HomeTeam,
+    Gosc = AwayTeam,
+    EloGospodarz = HomeElo,
+    EloGosc = AwayElo,
+    Forma3Gospodarz = Form3Home,
+    Forma5Gospodarz = Form5Home,
+    Forma3Gosc = Form3Away,
+    Forma5Gosc = Form5Away,
+    GoleGospodarz_Koniec = FTHome,
+    GoleGosc_Koniec = FTAway,
+    Wynik_Koniec = FTResult,
+    GoleGospodarz_Polowa = HTHome,
+    GoleGosc_Polowa = HTAway,
+    Wynik_Polowa = HTResult,
+    StrzalyGospodarz = HomeShots,
+    StrzalyGosc = AwayShots,
+    StrzalyCelneGospodarz = HomeTarget,
+    StrzalyCelneGosc = AwayTarget,
+    FauleGospodarz = HomeFouls,
+    FauleGosc = AwayFouls,
+    RozneGospodarz = HomeCorners,
+    RozneGosc = AwayCorners,
+    ZolteGospodarz = HomeYellow,
+    ZolteGosc = AwayYellow,
+    CzerwoneGospodarz = HomeRed,
+    CzerwoneGosc = AwayRed,
+    KursGospodarz = OddHome,
+    KursRemis = OddDraw,
+    KursGosc = OddAway,
+    MaxKursGospodarz = MaxHome,
+    MaxKursRemis = MaxDraw,
+    MaxKursGosc = MaxAway,
+    KursOver25 = Over25,
+    KursUnder25 = Under25,
+    HandicapWielkosc = HandiSize,
+    HandicapKursGospodarz = HandiHome,
+    HandicapKursGosc = HandiAway,
+    Styl_NiskieTempoGospodarz = C_LTH,
+    Styl_NiskieTempoGosc = C_LTA,
+    Styl_DominacjaGospodarz = C_VHD,
+    Styl_DominacjaGosc = C_VAD,
+    Styl_WysokieTempo = C_HTB,
+    Styl_MeczFizyczny = C_PHB
+  )
+
+kursy <- c(
+  "KursGospodarz", "KursRemis", "KursGosc",
+  "MaxKursGospodarz", "MaxKursRemis", "MaxKursGosc",
+  "KursOver25", "KursUnder25",
+  "HandicapKursGospodarz", "HandicapKursGosc"
+)
+
+dane <- dane |>
+  mutate(across(any_of(kursy), ~ parse_number(., locale = locale(decimal_mark = "."))))
+
+dane <- dane %>%
+  mutate(
+    EloGospodarz = as.numeric(EloGospodarz),
+    EloGosc = as.numeric(EloGosc),
+
+    GoleGospodarz_Koniec = as.numeric(GoleGospodarz_Koniec),
+    GoleGosc_Koniec = as.numeric(GoleGosc_Koniec),
+
+    KursGospodarz = as.numeric(KursGospodarz),
+    KursGosc = as.numeric(KursGosc),
+    KursRemis = as.numeric(KursRemis)
+  ) %>%
+  mutate(
+    KursGospodarz = ifelse(KursGospodarz < 1.01, NA, KursGospodarz),
+    KursGosc = ifelse(KursGosc < 1.01, NA, KursGosc)
+  )
+
+```
+
+### 1. Charakterystyka kluczowych zmiennych analitycznych
+
+Poniższa tabela przedstawia statystyki opisowe dla zmiennych, które posłużą do weryfikacji pytań badawczych (ranking Elo, liczba goli oraz kursy bukmacherskie). Ze względu na braki danych historycznych w niektórych ligach, statystyki obliczono na podstawie dostępnych rekordów.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(knitr)
+
+tabela_stat <- data.frame(
+  Zmienna = c("Ranking Elo Gospodarz", "Ranking Elo Gość", 
+              "Forma (5 meczów) Gospodarz", "Forma (5 meczów) Gość",
+              "Kurs na Gospodarza", "Kurs na Gościa", 
+              "Gole Gospodarz", "Gole Gość"),
+  
+  Średnia = c(
+    mean(dane$EloGospodarz, na.rm = TRUE),
+    mean(dane$EloGosc, na.rm = TRUE),
+    mean(as.numeric(dane$Forma5Gospodarz), na.rm = TRUE),
+    mean(as.numeric(dane$Forma5Gosc), na.rm = TRUE),
+    mean(dane$KursGospodarz, na.rm = TRUE),
+    mean(dane$KursGosc, na.rm = TRUE),
+    mean(dane$GoleGospodarz_Koniec, na.rm = TRUE),
+    mean(dane$GoleGosc_Koniec, na.rm = TRUE)
+  ),
+  
+  Minimum = c(
+    min(dane$EloGospodarz, na.rm = TRUE),
+    min(dane$EloGosc, na.rm = TRUE),
+    min(as.numeric(dane$Forma5Gospodarz), na.rm = TRUE),
+    min(as.numeric(dane$Forma5Gosc), na.rm = TRUE),
+    min(dane$KursGospodarz, na.rm = TRUE),
+    min(dane$KursGosc, na.rm = TRUE),
+    min(dane$GoleGospodarz_Koniec, na.rm = TRUE),
+    min(dane$GoleGosc_Koniec, na.rm = TRUE)
+  ),
+  
+  Maksimum = c(
+    max(dane$EloGospodarz, na.rm = TRUE),
+    max(dane$EloGosc, na.rm = TRUE),
+    max(as.numeric(dane$Forma5Gospodarz), na.rm = TRUE),
+    max(as.numeric(dane$Forma5Gosc), na.rm = TRUE),
+    max(dane$KursGospodarz, na.rm = TRUE),
+    max(dane$KursGosc, na.rm = TRUE),
+    max(dane$GoleGospodarz_Koniec, na.rm = TRUE),
+    max(dane$GoleGosc_Koniec, na.rm = TRUE)
+  ),
+  
+  `Liczba Meczów` = c(
+    sum(!is.na(dane$EloGospodarz)),
+    sum(!is.na(dane$EloGosc)),
+    sum(!is.na(dane$Forma5Gospodarz)),
+    sum(!is.na(dane$Forma5Gosc)),
+    sum(!is.na(dane$KursGospodarz)),
+    sum(!is.na(dane$KursGosc)),
+    sum(!is.na(dane$GoleGospodarz_Koniec)),
+    sum(!is.na(dane$GoleGosc_Koniec))
+  )
+)
+
+kable(tabela_stat, digits = 2, caption = "Statystyki opisowe zmiennych")
+```
+### Wnioski ze statystyk opisowych
+
+Analiza tabeli pozwala na sformułowanie następujących interpretacji:
+
+1.  **Równowaga sił w doborze par (Ranking Elo):**
+    * Średni ranking Elo dla gospodarzy i gości jest niemal identyczny (odpowiednio **1533.12** i **1533.17**). Świadczy to o tym, że zbiór danych jest dobrze zbalansowany – "siła" drużyn występujących w roli gospodarza i gościa jest średnio taka sama, więc ewentualne różnice w wynikach nie wynikają z tego, że u siebie grają po prostu lepsze zespoły.
+    * Szeroki zakres rankingów (od ok. **1103** do **2107**) pokazuje, że badanie obejmuje pełne spektrum piłkarskie – od lig słabszych po absolutny top.
+
+2.  **Forma drużyn – wyrównany poziom:**
+    * Średnia forma z ostatnich 5 meczów jest minimalnie wyższa dla gości (**6.93**) niż dla gospodarzy (**6.72**). Różnica ta jest jednak niewielka i sugeruje, że do meczów przystępują zazwyczaj zespoły o zbliżonej dyspozycji dnia.
+    * Maksymalna forma (**15 pkt**) osiągana jest przez obie strony, co potwierdza obecność w bazie drużyn znajdujących się w doskonałej serii zwycięstw.
+
+3.  **Kursy bukmacherskie – efekt własnego boiska:**
+    * Średni kurs na zwycięstwo gospodarzy wynosi **2.71**, podczas gdy na gości aż **4.34**. Jest to matematyczny dowód na to, jak silnie rynek wycenia atut własnego boiska. Bukmacherzy statystycznie dają gospodarzom znacznie większe szanse na sukces.
+    * Większe rozproszenie kursów na gości (maksimum **71.71**) wskazuje na większą niepewność i potencjał do wystąpienia sensacji w meczach wyjazdowych słabszych drużyn.
+
+4.  **Skuteczność ofensywna – weryfikacja statystyczna:**
+    * Średnia liczba goli gospodarzy (**1.49**) jest wyraźnie wyższa niż gości (**1.15**). To twardy dowód potwierdzający znany w sporcie "Home Advantage". Gospodarze strzelają średnio o ok. 30% więcej bramek.
+    * Jednocześnie maksymalny wynik gości (**13 goli**) pokazuje, że w skrajnych przypadkach (tzw. outlierach) atut boiska przestaje mieć znaczenie w starciu z gigantyczną przewagą umiejętności.
+
+**Podsumowując:** Tabela potwierdza kluczowe założenia przed dalszą analizą – dane są rzetelne (zbalansowane Elo), a zjawisko przewagi własnego boiska jest widoczne zarówno w liczbie goli, jak i w wycenach bukmacherów.
+
+
+# Analiza danych
+
+W tej części raportu przeanalizujemy wpływ wybranych czynników na wyniki meczów, aby odpowiedzieć na postawione pytania badawcze.
+
+## Pytanie 1: Wpływ rankingu Elo na wynik meczu
+
+Pierwszym krokiem jest zbadanie, czy teoretyczna siła drużyn, wyrażona rankingiem Elo, znajduje odzwierciedlenie w rzeczywistości. Zgodnie z założeniami modelu, drużyna z wyższym rankingiem powinna częściej wygrywać.
+
+Aby to sprawdzić, obliczyliśmy różnicę punktów Elo pomiędzy gospodarzem a gościem (`EloGospodarz - EloGosc`).
+
+* **Wartość dodatnia** oznacza, że faworytem jest gospodarz.
+* **Wartość ujemna** oznacza, że faworytem jest gość.
+
+Poniższy wykres przedstawia rozkład tej różnicy w podziale na faktyczny końcowy wynik meczu (H – wygrana gospodarzy, D – remis, A – wygrana gości).
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Wykres 1. Zależność między przewagą punktową Elo a wynikiem końcowym"
+
+library(ggplot2)
+library(dplyr)
+
+dane_analiza_1 <- dane %>%
+  filter(!is.na(EloGospodarz), !is.na(EloGosc), !is.na(Wynik_Koniec)) %>%
+  mutate(
+    Roznica_Elo = EloGospodarz - EloGosc,
+    Wynik_Koniec = factor(Wynik_Koniec, levels = c("A", "D", "H")) 
+  )
+
+ggplot(dane_analiza_1, aes(x = Wynik_Koniec, y = Roznica_Elo, fill = Wynik_Koniec)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.5, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray30") + 
+  scale_fill_manual(values = c("A" = "#E74C3C", "D" = "#95A5A6", "H" = "#2ECC71"),
+                    labels = c("Goście (A)", "Remis (D)", "Gospodarze (H)")) +
+  labs(
+    title = "Czy faworyt rankingu Elo faktycznie wygrywa?",
+    subtitle = "Zależność między przewagą punktową Elo a wynikiem końcowym",
+    x = "Rzeczywisty wynik meczu",
+    y = "Różnica Elo (Gospodarz minus Gość)",
+    fill = "Wynik"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold")
+  )
+```
+
+### Wnioski z analizy Wykresu 1
+
+1. **Wyraźna separacja zwycięzców:** Istnieje silna zależność między różnicą w rankingu a wynikiem.
+    - Pudełko dla **wygranych gospodarzy (H)** znajduje się zdecydowanie powyżej zera (dodatnia różnica Elo), co oznacza, że gospodarze wygrywają głównie wtedy, gdy są "na papierze" silniejsi.
+    - Pudełko dla **wygranych gości (A)** znajduje się poniżej zera, co potwierdza, że goście potrzebują wyraźnej przewagi w umiejętnościach (wyższego rankingu), aby pokonać atut własnego boiska gospodarza.
+
+2. **Trudność w przewidywaniu remisów:** Kategoria remisów (**D**) charakteryzuje się medianą zbliżoną do zera oraz węższym rozstępem międzykwartylowym. Oznacza to, że remisy padają najczęściej w meczach drużyn o zbliżonym potencjale, ale jest to wynik najtrudniejszy do odseparowania od pozostałych (pudełko "D" pokrywa się częściowo z "wąsami" pozostałych kategorii).
+
+3. **Występowanie niespodzianek (wartości odstające):** Na wykresie widoczne są liczne punkty poza "wąsami" (tzw. outliery). Reprezentują one mecze, w których słabsza drużyna pokonała faworyta (np. punkty wysoko na plusie w kategorii "A" lub nisko na minusie w kategorii "H"). Choć ranking Elo działa poprawnie dla ogółu, te odstępstwa sugerują, że w piłce nożnej czynnik losowy lub dyspozycja dnia odgrywają istotną rolę, której sam ranking historyczny nie jest w stanie w pełni uchwycić.
+
+## Pytanie 2: Przewidywalność meczów na szczycie ("Hity") vs. Reszta ligi
+
+Kolejnym celem analizy jest weryfikacja, czy mecze pomiędzy najsilniejszymi drużynami charakteryzują się inną specyfiką rozstrzygnięć niż typowe spotkania ligowe. Często zakłada się, że w starciach gigantów rynek jest bardziej efektywny, ale same wyniki mogą być trudniejsze do przewidzenia ze względu na wyrównany poziom sportowy.
+
+**Metodologia analizy:**
+
+Ponieważ zbiór danych nie zawiera bezpośredniej informacji o randze meczu, przyjęliśmy definicję opartą na rankingu siły drużyn:
+
+1. **Hity (Top vs Top):** Zdefiniowane jako spotkania, w których obie drużyny znajdują się w górnym kwartylu (najlepsze 25%) rankingu Elo całej bazy. Są to mecze o najwyższym potencjale sportowym.
+2. **Grupa porównawcza:** Wszystkie pozostałe spotkania ligowe.
+
+Jako miarę nieprzewidywalności wykorzystano **kurs bukmacherski zwycięskiego rozstrzygnięcia**:
+
+* Jeśli wygrywa zdecydowany faworyt, kurs wygranego zakładu jest niski (np. 1.20–1.50).
+* Jeśli mecz jest wyrównany lub dochodzi do niespodzianki, kurs wygranego zakładu jest wysoki (np. > 2.50).
+
+Poniższy wykres gęstości (Density Plot) porównuje rozkłady tych kursów dla obu grup, pozwalając ocenić, czy "Hity" są trudniejsze do typowania niż reszta ligi.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Wykres 2. Rozkład kursów zwycięskich rozstrzygnięć: Hity vs Reszta ligi."
+library(tidyverse)
+
+prog_Elo <- quantile(c(dane$EloGospodarz, dane$EloGosc), 0.75, na.rm = TRUE)
+
+dane_analiza_2 <- dane %>%
+  filter(!is.na(EloGospodarz), !is.na(EloGosc), !is.na(Wynik_Koniec)) %>%
+  mutate(
+    Typ_Meczu = ifelse(EloGospodarz > prog_Elo & EloGosc > prog_Elo, 
+                       "Hity (Top vs Top)", 
+                       "Pozostałe mecze"),    Kurs_Zwycieski = case_when(
+      Wynik_Koniec == "H" ~ KursGospodarz,
+      Wynik_Koniec == "D" ~ KursRemis,
+      Wynik_Koniec == "A" ~ KursGosc
+    )
+  ) %>%
+  filter(!is.na(Kurs_Zwycieski)) %>%
+  filter(Kurs_Zwycieski < 10)
+
+ggplot(dane_analiza_2, aes(x = Kurs_Zwycieski, fill = Typ_Meczu)) +
+  geom_density(alpha = 0.6) + 
+  labs(
+    title = "Czy mecze na szczycie są trudniejsze do przewidzenia?",
+    subtitle = "Porównanie rozkładu kursów dla trafionych wyników",
+    x = "Kurs bukmacherski trafionego wyniku (Im wyższy, tym większa niespodzianka)",
+    y = "Gęstość prawdopodobieństwa",
+    fill = "Rodzaj meczu"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Hity (Top vs Top)" = "#8E44AD", "Pozostałe mecze" = "#3498DB")) +
+  theme(legend.position = "top")
+```
+
+### Wnioski z analizy Wykresu 2
+
+Analiza wykresu gęstości pozwala na następujące obserwacje:
+
+1. **Podobna struktura rynkowa:** Zarówno dla "Hitów", jak i "Pozostałych meczów", główne skupiska trafionych wyników występują przy kursach w okolicach 2.0 oraz 3.0. Sugeruje to, że bukmacherzy podobnie wyceniają najbardziej prawdopodobne rozstrzygnięcia w obu grupach.
+
+2. **Niższa pewność w meczach na szczycie:** Kluczową różnicą jest wysokość szczytów (amplituda). Dla "Pozostałych meczów" (kolor niebieski) gęstość przy kursach 2.0 i 3.0 jest znacznie wyższa. Oznacza to, że w standardowych meczach częściej dochodzi do rozstrzygnięć zgodnych z przewidywaniami rynku o niskim kursie.
+
+3. **Spłaszczenie rozkładu "Hitów":** Linia fioletowa jest konsekwentnie niższa w strefie niskich kursów (poniżej 3.0). Potwierdza to, że w meczach o dużą stawkę rzadziej wygrywają "pewniacy", a rozkład wyników jest bardziej rozproszony, co utrudnia skuteczne przewidywanie.
+
+## Pytanie 3: Przewidywalność wyników w zależności od specyfiki ligi
+
+Następnym etapem analizy jest sprawdzenie, czy istnieją znaczące różnice w "przewidywalności" rozgrywek w zależności od kraju i poziomu ligowego. Celem tej części jest zidentyfikowanie lig, które cechują się największą stabilnością faworytów, oraz tych, w których najczęściej dochodzi do niespodzianek.
+
+**Metodologia analizy:**
+
+Aby obiektywnie zmierzyć trudność przewidywania danej ligi, przyjęliśmy następujące założenia:
+
+1. **Definicja faworyta**: Za faworyta uznajemy tę drużynę, na którą bukmacher wystawił niższy kurs przed rozpoczęciem spotkania (niższy kurs = wyższe prawdopodobieństwo sukcesu według rynku).
+2. **Miernik trafności**: Obliczamy procent meczów, w których faworyt faktycznie odniósł zwycięstwo.
+3. **Wizualizacja**: Wyniki prezentujemy na wykresie słupkowym, segregując ligi od najtrudniejszych (najniższy odsetek zwycięstw faworytów) do najbardziej przewidywalnych.
+
+Ligi zostały poddane filtracji, aby uwzględnić tylko te, dla których posiadamy w bazie ponad 100 zarejestrowanych spotkań, co zapewnia wiarygodność statystyczną prezentowanych danych.
+
+```{r}
+library(tidyverse)
+dane <- dane %>%
+
+  mutate(
+
+    NazwaLigi = case_when(
+
+
+      Liga == "E0" ~ "Premier League (Anglia)",
+
+      Liga == "E1" ~ "Championship (Anglia 2)",
+
+      Liga == "E2" ~ "League One (Anglia 3)",
+
+      Liga == "E3" ~ "League Two (Anglia 4)",
+
+      Liga == "EC" ~ "National League (Anglia 5)",
+
+      
+
+      Liga == "D1" ~ "Bundesliga (Niemcy)",
+
+      Liga == "D2" ~ "2. Bundesliga (Niemcy 2)",
+
+      
+
+
+      Liga == "I1" ~ "Serie A (Włochy)",
+
+      Liga == "I2" ~ "Serie B (Włochy 2)",
+
+
+
+      Liga == "SP1" ~ "La Liga (Hiszpania)",
+
+      Liga == "SP2" ~ "Segunda Division (Hiszpania 2)",
+
+
+
+      Liga == "F1" ~ "Ligue 1 (Francja)",
+
+      Liga == "F2" ~ "Ligue 2 (Francja 2)",
+
+      
+
+
+      Liga == "SC0" ~ "Premiership (Szkocja)",
+
+      Liga == "SC1" ~ "Championship (Szkocja 2)",
+
+      Liga == "SC2" ~ "League One (Szkocja 3)",
+      
+      Liga == "SC3" ~ "League two (Szkocja 4)",
+
+      
+
+
+      Liga == "N1" ~ "Eredivisie (Holandia)",
+
+      Liga == "B1" ~ "Jupiler League (Belgia)",
+
+      Liga == "P1" ~ "Liga Portugal (Portugalia)",
+
+      Liga == "T1" ~ "Süper Lig (Turcja)",
+
+      Liga == "G1" ~ "Super League (Grecja)",
+
+      
+
+      Liga == "ARG" ~ "Liga Profesional (Argentyna)",
+
+      Liga == "AUT" ~ "Bundesliga (Austria)",
+
+      Liga == "BRA" ~ "Serie A (Brazylia)",
+
+      Liga == "CHN" ~ "Super League (Chiny)",
+
+      Liga == "DNK" ~ "Superliga (Dania)",
+
+      Liga == "FIN" ~ "Veikkausliiga (Finlandia)",
+
+      Liga == "IRL" ~ "Premier Division (Irlandia)",
+
+      Liga == "JAP" ~ "J1 League (Japonia)",
+
+      Liga == "MEX" ~ "Liga MX (Meksyk)",
+
+      Liga == "NOR" ~ "Eliteserien (Norwegia)",
+
+      Liga == "POL" ~ "Ekstraklasa (Polska)",
+
+      Liga == "ROU" ~ "Liga I (Rumunia)",
+
+      Liga == "RUS" ~ "Premier League (Rosja)",
+
+      Liga == "SWE" ~ "Allsvenskan (Szwecja)",
+
+      Liga == "SWZ" ~ "Super League (Szwajcaria)",
+
+      Liga == "USA" ~ "MLS (USA)",
+
+      
+
+      TRUE ~ as.character(Liga)
+
+    )
+
+  )
+
+dane_analiza_3 <- dane %>%
+  filter(!is.na(KursGospodarz), !is.na(KursGosc), !is.na(Wynik_Koniec)) %>%
+  mutate(
+    Faworyt = case_when(
+      KursGospodarz < KursGosc ~ "H", 
+      KursGosc < KursGospodarz ~ "A", 
+      TRUE ~ "Brak"
+    ),
+    Czy_Faworyt_Wygral = (Faworyt == Wynik_Koniec)
+  ) %>%
+  filter(Faworyt != "Brak") %>%
+  group_by(NazwaLigi) %>%
+  summarise(
+    Liczba_Meczow = n(),
+    Procent_Trafien = mean(Czy_Faworyt_Wygral) * 100
+  ) %>%
+  filter(Liczba_Meczow > 100)
+
+ggplot(dane_analiza_3, aes(x = reorder(NazwaLigi, Procent_Trafien), y = Procent_Trafien, fill = Procent_Trafien)) +
+  geom_col() +
+  coord_flip() + 
+  scale_fill_gradient(low = "#E74C3C", high = "#2ECC71") + 
+  labs(
+    title = "Najtrudniejsza liga do przewidzenia?",
+    subtitle = "Odsetek zwycięstw faworytów",
+    x = "Liga",
+    y = "Skuteczność faworytów (%)",
+    fill = "Trafność"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  geom_text(aes(label = round(Procent_Trafien, 1)), hjust = 1.2, color = "white", size = 3, fontface = "bold")
+```
+
+### Wnioski z analizy Wykresu 3
+
+1. Z przeprowadzonej analizy wynika, że przewidywalność wyników sportowych jest silnie uzależniona od specyfiki danej ligi. Najwyższą skuteczność faworytów odnotowano w **lidze brazylijskiej (57,1%)**. Tak wysoki odsetek może świadczyć o wyraźnej dominacji czołowych klubów, takich jak *Palmeiras* czy *Flamengo*, choć w literaturze analitycznej często wskazuje się również na ryzyko zniekształcenia tych wyników przez zjawisko korupcji.
+
+2. Na przeciwnym biegunie znajduje się **liga japońska (37%)**, która okazuje się najbardziej nieprzewidywalna. Świadczy to o jej wysokiej konkurencyjności i wyrównanym poziomie technicznym, gdzie status faworyta najrzadziej przekłada się na realny wynik.
+
+3. **Zróżnicowanie czołowych lig europejskich:** Wbrew pozorom, najpopularniejsze ligi nie wykazują identycznej przewidywalności. Na wykresie wyraźnie widać, że faworyci znacznie częściej zawodzą w angielskiej **Premier League (42,3%)** niż w hiszpańskiej **La Liga (45%)** czy włoskiej **Serie A (44,5%)**. Sugeruje to, że mimo ogromnej precyzji rynku bukmacherskiego w tym regionie, liga angielska pozostaje znacznie bardziej wyrównana i podatna na niespodzianki niż jej europejskie odpowiedniki. Większość lig "mainstreamowych" faktycznie oscyluje w granicach 42-45%, jednak nawet te 2–3 punkty procentowe różnicy stanowią o zupełnie innym poziomie ryzyka przy typowaniu faworytów.
+
+## Pytanie 4: Wpływ aktualnej serii zwycięstw na wynik spotkania
+
+Ostatnim badanym czynnikiem jest tzw. "momentum", czyli wpływ aktualnej dyspozycji drużyny na jej szanse w kolejnym meczu. W tej części raportu sprawdzamy, czy potoczna opinia o "dobrej serii", która niesie zespół, znajduje potwierdzenie w twardych danych statystycznych.
+
+**Metodologia analizy:**
+
+1. **Wskaźnik formy:** Wykorzystujemy zmienną **Forma5Gospodarz**, która sumuje punkty zdobyte przez gospodarzy w ostatnich pięciu spotkaniach (w skali od 0 do 15 punktów, bez wartości 14).
+2. **Cel:** Chcemy sprawdzić, czy wraz ze wzrostem liczby punktów z ostatnich meczów rośnie procentowa szansa na wygraną w nadchodzącym starciu.
+3. **Weryfikacja trendu:** Na wykresie słupkowym nanosimy linię trendu, która pozwoli ocenić siłę korelacji między ostatnimi wynikami a faktyczną skutecznością na boisku.
+
+**Metodologia analizy i sposób obliczeń:**
+
+Proces przygotowania danych do powyższego wykresu opiera się na następujących krokach technicznych:
+
+1. **Konwersja typów**: Zmienna `Forma5Gospodarz` zostaje przekształcona na typ numeryczny, co umożliwia operacje matematyczne na punktach (0–15).
+2. **Oczyszczanie**: Usuwamy wszystkie rekordy, które posiadają braki danych (`NA`) w kolumnach formy lub wyniku końcowego, aby nie zaburzać statystyk.
+3. **Agregacja (Grupowanie)**: Dane zostają pogrupowane według unikalnych wartości punktowych formy. Dla każdej z grup (np. dla drużyn, które zdobyły dokładnie 10 punktów w 5 meczach) obliczamy:
+    - **Liczbę meczów** (`n()`): łączna liczba spotkań rozegranych przez drużyny o danej formie.
+    - **Skuteczność** (`mean(Wynik_Koniec == "H") * 100`): średnia wartość logiczna warunku "czy wygrał gospodarz", zamieniona na procenty.
+4. **Filtracja istotności**: Odrzucamy grupy, które reprezentują mniej niż 50 meczów. Dzięki temu unikamy sytuacji, w której pojedynczy mecz o nietypowym wyniku drastycznie zmienia słupek na wykresie, co zapewnia większą wiarygodność trendu.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Wykres 4. Skuteczność gospodarzy w zależności od formy (ostatnie 5 meczów)"
+
+library(dplyr)
+library(ggplot2)
+library(stringr)
+
+dane_analiza_4 <- dane %>%
+  mutate(
+    Forma5Gospodarz = as.numeric(Forma5Gospodarz)
+  ) %>%
+  filter(!is.na(Forma5Gospodarz), !is.na(Wynik_Koniec)) %>%
+  group_by(Forma5Gospodarz) %>%
+  summarise(
+    Liczba_Meczow = n(),
+    Procent_Wygranych = mean(Wynik_Koniec == "H") * 100
+  ) %>%
+  filter(Liczba_Meczow > 50)
+
+ggplot(dane_analiza_4, aes(x = Forma5Gospodarz, y = Procent_Wygranych)) +
+  geom_col(aes(fill = Procent_Wygranych)) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
+  scale_fill_gradient(low = "#AED6F1", high = "#2E86C1") +
+  scale_x_continuous(breaks = 0:15) +
+  expand_limits(y = max(dane_analiza_4$Procent_Wygranych) * 1.25) +
+  labs(
+    title = str_wrap("Czy 'dobra seria' gwarantuje punkty?", 40),
+    subtitle = str_wrap("Procent zwycięstw gospodarzy w zależności od punktów z ostatnich 5 meczów", 60),
+    x = "Punkty zdobyte w ostatnich 5 meczach (Forma)",
+    y = "Skuteczność zwycięstw gospodarzy (%)",
+    fill = "% Wygranych"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11)
+  ) +
+  geom_text(
+    aes(label = round(Procent_Wygranych, 1)), 
+    angle = 90,   
+    hjust = -0.2,  
+    vjust = 0.5,  
+    size = 3       
+  )
+```
+
+### Wnioski z analizy Wykresu 4
+
+1. **Silna korelacja dodatnia:** Wykres wyraźnie pokazuje trend wzrostowy, co potwierdza naniesiona linia trendu. Im lepszą serię wyników notuje gospodarz przed meczem, tym statystycznie wyższe jest prawdopodobieństwo odniesienia kolejnego zwycięstwa. Drużyny z maksymalną formą (15 pkt) wygrywają aż w **64% przypadków**, podczas gdy te w kryzysie (0 pkt) odnoszą sukces tylko w co trzecim meczu (33%).
+
+2. **Potwierdzenie efektu "momentum":** Różnica w skuteczności między drużyną w słabej formie a tą w serii zwycięstw wynosi ponad 30 punktów procentowych. Sugeruje to, że aktualna pewność siebie zespołu i rytm meczowy są kluczowymi czynnikami.
+
+3. **Wyjaśnienie braku danych dla wartości 14:** Na osi X zauważalna jest całkowita przerwa dla wartości **14 punktów**. Nie wynika ona z braków w bazie danych, lecz z **logiki matematycznej systemu punktowego w piłce nożnej** (3 pkt za zwycięstwo, 1 pkt za remis, 0 pkt za porażkę). Niemożliwe jest uzyskanie 14 punktów w 5 meczach:
+    - **13 pkt** (4 zwycięstwa, 1 remis),
+    - **15 pkt** (5 zwycięstw).
+    Wartość 14 jest zatem statystycznie niemożliwa do osiągnięcia w serii pięciu spotkań.
+
+4. **Wnioski praktyczne:** Stabilny wzrost słupków od 0 do 13 oraz skok przy 15 punktach sugerują, że każda dodatkowa jednostka "formy" realnie zwiększa szanse na sukces. Jest to sygnał dla analityków, że przy ocenie ryzyka meczu należy brać pod uwagę nie tylko klasę historyczną zespołów, ale przede wszystkim ich dyspozycję z ostatnich 3–4 tygodni.
+
+# Podsumowanie i wnioski końcowe
+
+Przeprowadzona analiza pozwoliła na kompleksowe spojrzenie na mechanizmy rządzące wynikami w piłce nożnej. Kluczowe wnioski projektu to:
+
+1. **Efektywność modeli statystycznych:** Ranking Elo pozostaje solidnym fundamentem oceny siły zespołów, jednak jego skuteczność drastycznie spada w meczach o wyrównanym poziomie ("Hity"), gdzie czynnik losowy odgrywa większą rolę.
+2. **Siła "Momentum":** Aktualna forma (seria 5 meczów) okazała się jednym z najsilniejszych predyktorów zwycięstwa. Skuteczność rosnąca z 33% (przy braku punktów) do 64% (przy komplecie punktów) pokazuje, że psychologia zwycięstwa i rytm meczowy są równie ważne co czyste umiejętności techniczne.
+3. **Specyfika geograficzna:** Rynek nie jest jednolity. Podczas gdy w Europie jest on precyzyjny (skuteczność faworytów ok. 45%), w ligach takich jak brazylijska czy japońska występują anomalie wynikające ze specyfiki lokalnej rywalizacji lub dominacji finansowej pojedynczych klubów.
+
+Ostatecznie, najskuteczniejsza analiza meczu piłkarskiego powinna łączyć długoterminowy potencjał (Elo) z krótkoterminową dyspozycją (Forma), przy jednoczesnym uwzględnieniu specyfiki ligi, w której toczy się spotkanie.
+
+# Źródło danych
+
+**Autor:** Adam Gábor  
+**ORCID:** [0009-0001-9252-5976](https://orcid.org/0009-0001-9252-5976)  
+**Afiliacja:** Faculty of Informatics and Information Technologies, Slovak University of Technology in Bratislava  
+**Rok:** 2025  
+
+**Cytowanie:** Gábor, A. (2025). *Club Football Match Data*. Retrieved from [https://github.com/xgabora/Club-Football-Match-Data-2000-2025/](https://github.com/xgabora/Club-Football-Match-Data-2000-2025/)
